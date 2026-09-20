@@ -7,7 +7,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 const prisma = new PrismaClient();
 const bot = new Bot(process.env.TELEGRAM_BOT_TOKEN || '');
 
-// Reusable Main Menu Inline Keyboard layout matching your desired dashboard
+// Reusable Main Menu Inline Keyboard layout matching the user's dashboard design
 const getMainMenuKeyboard = (autoMintActive: boolean = false) => {
   return new InlineKeyboard()
     .text("💼 My Wallets", "menu_wallets").text("➕ New Wallet", "menu_new_wallet").row()
@@ -45,7 +45,6 @@ bot.use(async (ctx, next) => {
 
 // /start command
 bot.command('start', async (ctx) => {
-  const user = (ctx as any).dbUser;
   const welcomeText = 
     `🤖 *Mint-Executor-Engine Dashboard*\n\n` +
     `Welcome! Manage your wallets, scan contracts, and auto-mint high-potential NFTs across multi-chains (Base, ETH, Robinhood, Arc, Ink).\n\n` +
@@ -184,18 +183,17 @@ bot.callbackQuery('menu_settings', async (ctx) => {
 });
 
 bot.callbackQuery('menu_toggle_automint', async (ctx) => {
-  // Quick toggle state mockup
   await ctx.answerCallbackQuery({ text: "Auto-Mint toggled!" });
   await ctx.editMessageText(
     `🤖 *Mint-Executor-Engine Dashboard*\n\nSelect an option below:`,
     {
       parse_mode: 'Markdown',
-      reply_markup: getMainMenuKeyboard(true), // shows ON state
+      reply_markup: getMainMenuKeyboard(true),
     }
   );
 });
 
-// Text & Command handlers remain fully operational
+// Command handlers
 bot.command('addwallet', async (ctx) => {
   const user = (ctx as any).dbUser;
   const input = ctx.match?.trim() || '';
@@ -271,6 +269,12 @@ bot.command('snipe', async (ctx) => {
   } else {
     await ctx.reply(`❌ *Execution Failed:*\n\`${result.error}\``, { parse_mode: 'Markdown', reply_markup: backToMenuKeyboard });
   }
+});
+
+// Error boundary to safely capture and print runtime issues in Railway logs
+bot.catch((err) => {
+  const ctx = err.ctx;
+  console.error(`[TelegramBot] Error while handling update ${ctx.update.update_id}:`, err.error);
 });
 
 export function startTelegramBot() {
