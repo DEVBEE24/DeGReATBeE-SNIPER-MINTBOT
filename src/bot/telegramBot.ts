@@ -2,12 +2,12 @@ import { Bot, InlineKeyboard } from 'grammy';
 import { PrismaClient } from '@prisma/client';
 import { encryptPrivateKey } from '../core/crypto';
 import { dispatchMintTransaction } from '../core/dispatcher';
-import { privateKeyToAccount } from 'viem/accounts';
+import { privateKeyToAccount, generatePrivateKey } from 'viem/accounts';
 
 const prisma = new PrismaClient();
 const bot = new Bot(process.env.TELEGRAM_BOT_TOKEN || '');
 
-// Reusable Main Menu Inline Keyboard layout matching the user's dashboard design
+// Reusable Main Menu Inline Keyboard layout
 const getMainMenuKeyboard = (autoMintActive: boolean = false) => {
   return new InlineKeyboard()
     .text("💼 My Wallets", "menu_wallets").text("➕ New Wallet", "menu_new_wallet").row()
@@ -74,7 +74,7 @@ bot.callbackQuery('menu_wallets', async (ctx) => {
 
   let response = '👛 *Your Configured Wallets:*\n\n';
   if (wallets.length === 0) {
-    response += '⚠️ No wallets found. Click "New Wallet" to add one.';
+    response += '⚠️ No wallets found. Click "New Wallet" to generate or add one.';
   } else {
     wallets.forEach((w, index) => {
       response += `${index + 1}. *${w.label}*${w.isDefault ? '(Default)' : ''}\n   \`${w.address}\`\n\n`;
@@ -89,16 +89,65 @@ bot.callbackQuery('menu_wallets', async (ctx) => {
 });
 
 bot.callbackQuery('menu_new_wallet', async (ctx) => {
+  const keyboard = new InlineKeyboard()
+    .text("🎲 Generate Fresh Wallet", "menu_generate_wallet").row()
+    .text("🏠 Main Menu", "menu_main");
+
   await ctx.editMessageText(
-    `➕ *Add New Wallet*\n\n` +
-    `To link a secure wallet, send the command in chat like this:\n` +
-    `\`/addwallet <private_key> [label]\`\n\n` +
-    `*Example:* \`/addwallet 0xabc123... PrimarySniper\``,
+    `➕ *Add or Generate Wallet*\n\n` +
+    `Choose an option below to add a trading wallet to your account:\n\n` +
+    `1️⃣ *Generate Fresh Wallet:* Instantly create a brand new encrypted burner wallet.\n` +
+    `2️⃣ *Import Existing Key:* Send the command \`/addwallet <private_key> [label]\` in chat.`,
     {
       parse_mode: 'Markdown',
-      reply_markup: backToMenuKeyboard,
+      reply_markup: keyboard,
     }
   );
+  await ctx.answerCallbackQuery();
+});
+
+// Instant Wallet Generator Callback
+bot.callbackQuery('menu_generate_wallet', async (ctx) => {
+  const user = (ctx as any).dbUser;
+
+  try {
+    // Generate a secure random private key using viem
+    const rawPrivateKey = generatePrivateKey();
+    const account = privateKeyToAccount(rawPrivateKey);
+    const encryptedKey = encryptPrivateKey(rawPrivateKey);
+
+    // Check how many wallets user has to determine label and default status
+    const existingCount = await prisma.wallet.count({ where: { userId: user.id } });
+    const label = `Sniper Wallet #${existingCount + 1}`;
+    const isDefault = existingCount === 0;
+
+    await prisma.wallet.create({
+      data: {
+        userId: user.id,
+        address: account.address,
+        encryptedKey,
+        label,
+        isDefault,
+      },
+    });
+
+    const responseText = 
+      `🎉 *New Wallet Generated & Encrypted Successfully!*\n\n` +
+      `🏷 *Label:* ${label}\n` +
+      `🔹 *Address:* \`${account.address}\`\n\n` +
+      `🔑 *Private Key:* \`${rawPrivateKey}\`\n\n` +
+      `⚠️ *IMPORTANT:* Save your private key securely. It is safely encrypted in your database, but keep a backup!`;
+
+    await ctx.editMessageText(responseText, {
+      parse_mode: 'Markdown',
+      reply_markup: backToMenuKeyboard,
+    });
+  } catch (err: any) {
+    await ctx.editMessageText(`❌ *Failed to generate wallet:* \`${err.message}\``, {
+      parse_mode: 'Markdown',
+      reply_markup: backToMenuKeyboard,
+    });
+  }
   await ctx.answerCallbackQuery();
 });
 
@@ -231,6 +280,42 @@ bot.command('addwallet', async (ctx) => {
   }
 });
 
+// Quick command to generate wallet directly via chat
+bot.command('generatewallet', async (ctx) => {
+  const user = (ctx as any).dbUser;
+
+  try {
+    const rawPrivateKey = generatePrivateKey();
+    const account = privateKeyToAccount(rawPrivateKey);
+    const encryptedKey = encryptPrivateKey(rawPrivateKey);
+
+    const existingCount = await prisma.wallet.count({ where: { userId: user.id } });
+    const label = `Sniper Wallet #${existingCount + 1}`;
+    const isDefault = existingCount === 0;
+
+    await prisma.wallet.create({
+      data: {
+        userId: user.id,
+        address: account.address,
+        encryptedKey,
+        label,
+        isDefault,
+      },
+    });
+
+    await ctx.reply(
+      `🎉 *New Wallet Generated & Encrypted!*\n\n` +
+      `🏷 *Label:* ${label}\n` +
+      `🔹 *Address:* \`${account.address}\`\n\n` +
+      `🔑 *Private Key:* \`${rawPrivateKey}\`\n\n` +
+      `⚠️ *IMPORTANT:* Save your private key securely!`,
+      { parse_mode: 'Markdown', reply_markup: backToMenuKeyboard }
+    );
+  } catch (err: any) {
+    await ctx.reply(`❌ *Error generating wallet:* \`${err.message}\``, { parse_mode: 'Markdown' });
+  }
+});
+
 bot.command('snipe', async (ctx) => {
   const user = (ctx as any).dbUser;
   const input = ctx.match?.trim() || '';
@@ -247,7 +332,7 @@ bot.command('snipe', async (ctx) => {
   const wallet = await prisma.wallet.findFirst({ where: { userId: user.id, isDefault: true } });
 
   if (!wallet) {
-    return ctx.reply('❌ No default wallet found. Add a wallet first.', { parse_mode: 'Markdown' });
+    return ctx.reply('❌ No default wallet found. Generate or add a wallet first.', { parse_mode: 'Markdown' });
   }
 
   await ctx.reply(`🚀 *Running Pre-Flight & Dispatch on [${chainName.toUpperCase()}]*\nTarget: \`${contractAddress}\``, { parse_mode: 'Markdown' });
@@ -267,11 +352,11 @@ bot.command('snipe', async (ctx) => {
   if (result.success) {
     await ctx.reply(`✅ *Mint Executed Successfully!*\n\n🔗 *Tx Hash:* \`${result.txHash}\``, { parse_mode: 'Markdown', reply_markup: backToMenuKeyboard });
   } else {
-    await ctx.reply(`❌ *Execution Failed:*\n\`${result.error}\``, { parse_mode: 'Markdown', reply_markup: backToMenuKeyboard });
+    await ctx.reply(`❌ *Execution Failed:*\n\`{result.error}\``, { parse_mode: 'Markdown', reply_markup: backToMenuKeyboard });
   }
 });
 
-// Error boundary to safely capture and print runtime issues in Railway logs
+// Error boundary
 bot.catch((err) => {
   const ctx = err.ctx;
   console.error(`[TelegramBot] Error while handling update ${ctx.update.update_id}:`, err.error);
