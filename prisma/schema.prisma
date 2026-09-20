@@ -1,0 +1,59 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id            String       @id @default(uuid())
+  telegramId    String       @unique
+  username      String?      
+  isActive      Boolean      @default(true)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  
+  wallets       Wallet[]
+  settings      UserSettings?
+  executionLogs ExecutionLog[]
+}
+
+model Wallet {
+  id             String   @id @default(uuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  address        String   
+  encryptedKey   String   
+  label          String?  
+  isDefault      Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  @@index([userId])
+}
+
+model UserSettings {
+  id              String   @id @default(uuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  defaultGasLimit String   @default("0.005") 
+  priorityGwei    String   @default("2.0")   
+  slippageTolerance Int    @default(1)       
+  autoTipEnabled  Boolean  @default(true)
+  updatedAt       DateTime @updatedAt
+}
+
+model ExecutionLog {
+  id           String   @id @default(uuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chain        String   
+  contractAddr String
+  status       String   
+  txHash       String?
+  errorReason  String?
+  createdAt    DateTime @default(now())
+
+  @@index([userId])
+}
