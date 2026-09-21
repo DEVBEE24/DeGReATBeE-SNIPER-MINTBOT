@@ -1,5 +1,5 @@
 import { createPublicClient, http, Address, getAddress } from 'viem';
-import { getChainConfig } from './walletManager';
+import { getChainConfig } from '../config/chains';
 
 export interface AuditResult {
   isValid: boolean;
@@ -10,13 +10,16 @@ export interface AuditResult {
   error?: string;
 }
 
+/**
+ * Scans an EVM contract bytecode and evaluates safety signatures.
+ */
 export async function runSecurityAudit(chainName: string, contractAddress: string): Promise<AuditResult> {
   try {
     const formattedAddress = getAddress(contractAddress);
     const chain = getChainConfig(chainName);
     const client = createPublicClient({ chain, transport: http() });
 
-    // 1. Fetch Bytecode
+    // 1. Fetch Bytecode from blockchain
     const bytecode = await client.getBytecode({ address: formattedAddress });
     
     if (!bytecode || bytecode === '0x') {
@@ -59,7 +62,9 @@ export async function runSecurityAudit(chainName: string, contractAddress: strin
   }
 }
 
-// Compatibility wrapper for dispatcher.ts & pre-flight verification
+/**
+ * Pre-flight check wrapper required by the transaction dispatcher.
+ */
 export async function runPreFlightCheck(
   chainName: string,
   contractAddress: Address,
