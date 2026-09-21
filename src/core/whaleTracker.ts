@@ -1,5 +1,5 @@
 import { createPublicClient, http, Address } from 'viem';
-import { getChainConfig } from './walletManager';
+import { getChainConfig } from '../config/chains';
 import { dispatchMintTransaction, MintExecutionParams } from './dispatcher';
 
 export interface WhaleListenerConfig {
@@ -33,7 +33,7 @@ export function startWhaleTracker(config: WhaleListenerConfig) {
 
   const normalizedWhales = new Set(whaleAddresses.map((addr) => addr.toLowerCase()));
 
-  console.log(`[WhaleTracker] 🚀 Listening on [${chainName}] for ${whaleAddresses.length} whales (User: ${userId})`);
+  console.log(`[WhaleTracker] 🚀 Listening on [${chainName}] for ${whaleAddresses.length} whales (User:${userId})`);
 
   const unwatch = publicClient.watchBlocks({
     includeTransactions: true,
@@ -46,7 +46,7 @@ export function startWhaleTracker(config: WhaleListenerConfig) {
             const targetContract = tx.to;
             if (!targetContract) continue;
 
-            console.log(`[WhaleTracker] 🎯 Whale hit! Whale ${tx.from} -> Contract ${targetContract}`);
+            console.log(`[WhaleTracker] 🎯 Whale hit! Whale ${tx.from} -> Contract${targetContract}`);
 
             const executionParams: MintExecutionParams = {
               encryptedPrivateKey,
