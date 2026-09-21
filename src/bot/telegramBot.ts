@@ -3,7 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { encryptPrivateKey, decryptPrivateKey } from '../core/crypto';
 import { dispatchMintTransaction } from '../core/dispatcher';
 import { runSecurityAudit } from '../core/scanner';
-import { getChainConfig } from '../core/walletManager';
+import { getChainConfig } from '../config/chains';
 import { privateKeyToAccount, generatePrivateKey } from 'viem/accounts';
 import { createPublicClient, http, formatEther, Address } from 'viem';
 
