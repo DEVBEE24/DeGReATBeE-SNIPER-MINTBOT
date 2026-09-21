@@ -12,7 +12,7 @@ bot.use(async (ctx, next) => {
   if (!ctx.from) return;
   const telegramId = ctx.from.id.toString();
 
-  let user = await queryOne<User & { settings?: UserSettings; wallets?: Wallet[]; whale_targets?: WhaleTarget[]; chain_toggles?: ChainToggle[] }>(
+  let user: any = await queryOne<User>(
     `SELECT * FROM users WHERE telegram_id = $1`,
     [telegramId]
   );
