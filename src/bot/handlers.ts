@@ -25,7 +25,7 @@ export function registerHandlers(bot: any) {
     await ctx.answerCallbackQuery();
   });
 
-  // Wallets Hub (List with active toggles & exports)
+  // Wallets Hub
   bot.callbackQuery('menu_wallets', async (ctx: any) => {
     const user = ctx.dbUser;
     const wallets = await prisma.wallet.findMany({ where: { userId: user.id } });
@@ -52,7 +52,7 @@ export function registerHandlers(bot: any) {
     await ctx.answerCallbackQuery();
   });
 
-  // Wallet Toggle Handler (Active/Inactive)
+  // Wallet Toggle Handler
   bot.callbackQuery(/^wallet_toggle_(.+)$/, async (ctx: any) => {
     const walletId = ctx.match[1];
     const wallet = await prisma.wallet.findUnique({ where: { id: walletId } });
@@ -128,26 +128,23 @@ export function registerHandlers(bot: any) {
     await ctx.answerCallbackQuery();
   });
 
-  // Self-Healing Chains Hub (Checkmark Toggles)
+  // Chains Hub (Upsert Seeding & Rendering)
   bot.callbackQuery('menu_chains', async (ctx: any) => {
     const user = ctx.dbUser;
-    const chainStates = [];
 
     for (const net of SUPPORTED_NETWORKS) {
-      let toggle = await prisma.chainToggle.findUnique({
-        where: { userId_chainName: { userId: user.id, chainName: net.chainName } }
+      await prisma.chainToggle.upsert({
+        where: { userId_chainName: { userId: user.id, chainName: net.chainName } },
+        update: {},
+        create: { userId: user.id, chainName: net.chainName, enabled: true }
       });
-      if (!toggle) {
-        toggle = await prisma.chainToggle.create({
-          data: { userId: user.id, chainName: net.chainName, enabled: true }
-        });
-      }
-      chainStates.push({ chainName: net.chainName, enabled: toggle.enabled });
     }
+
+    const chains = await prisma.chainToggle.findMany({ where: { userId: user.id } });
 
     await ctx.editMessageText(
       `⚙️ *Alert & Execution Subscriptions*\n\nTap any network below to toggle execution status instantly:`,
-      { parse_mode: 'Markdown', reply_markup: getChainSubscriptionsKeyboard(chainStates) }
+      { parse_mode: 'Markdown', reply_markup: getChainSubscriptionsKeyboard(chains) }
     );
     await ctx.answerCallbackQuery();
   });
@@ -166,27 +163,18 @@ export function registerHandlers(bot: any) {
         data: { enabled: !current.enabled }
       });
     } else {
-      await prisma.chainToggle.create({
-        data: { userId: user.id, chainName, enabled: true }
+      await prisma.chainToggle.upsert({
+        where: { userId_chainName: { userId: user.id, chainName } },
+        update: { enabled: true },
+        create: { userId: user.id, chainName, enabled: true }
       });
     }
 
-    const chainStates = [];
-    for (const net of SUPPORTED_NETWORKS) {
-      let toggle = await prisma.chainToggle.findUnique({
-        where: { userId_chainName: { userId: user.id, chainName: net.chainName } }
-      });
-      if (!toggle) {
-        toggle = await prisma.chainToggle.create({
-          data: { userId: user.id, chainName: net.chainName, enabled: true }
-        });
-      }
-      chainStates.push({ chainName: net.chainName, enabled: toggle.enabled });
-    }
+    const chains = await prisma.chainToggle.findMany({ where: { userId: user.id } });
 
     await ctx.editMessageText(`⚙️ *Alert & Execution Subscriptions*\n\nUpdated [${chainName.toUpperCase()}] status:`, {
       parse_mode: 'Markdown',
-      reply_markup: getChainSubscriptionsKeyboard(chainStates),
+      reply_markup: getChainSubscriptionsKeyboard(chains),
     });
     await ctx.answerCallbackQuery({ text: `Toggled ${chainName}` });
   });
