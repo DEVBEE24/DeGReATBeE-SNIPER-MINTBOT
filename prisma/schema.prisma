@@ -8,52 +8,53 @@ generator client {
 }
 
 model User {
-  id            String       @id @default(uuid())
-  telegramId    String       @unique
-  username      String?      
-  isActive      Boolean      @default(true)
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
-  
-  wallets       Wallet[]
-  settings      UserSettings?
-  executionLogs ExecutionLog[]
+  id           String         @id @default(uuid())
+  telegramId   String         @unique
+  username     String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  wallets      Wallet[]
+  settings     UserSettings?
+  whaleTargets WhaleTarget[]
+  chains       ChainToggle[]
+}
+
+model UserSettings {
+  id                String   @id @default(uuid())
+  userId            String   @unique
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  priorityGwei      String   @default("3.0")
+  defaultGasLimit   String   @default("0.005")
+  slippageTolerance Int      @default(1)
+  autoMintActive    Boolean  @default(false)
 }
 
 model Wallet {
   id             String   @id @default(uuid())
   userId         String
   user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  address        String   
-  encryptedKey   String   
-  label          String?  
+  address        String
+  encryptedKey   String
+  label          String   @default("Sniper Wallet")
   isDefault      Boolean  @default(false)
   createdAt      DateTime @default(now())
-
-  @@index([userId])
 }
 
-model UserSettings {
-  id              String   @id @default(uuid())
-  userId          String   @unique
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  defaultGasLimit String   @default("0.005") 
-  priorityGwei    String   @default("2.0")   
-  slippageTolerance Int    @default(1)       
-  autoTipEnabled  Boolean  @default(true)
-  updatedAt       DateTime @updatedAt
+model WhaleTarget {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chainName   String
+  address     String
+  label       String   @default("Whale Target")
+  createdAt   DateTime @default(now())
 }
 
-model ExecutionLog {
-  id           String   @id @default(uuid())
-  userId       String
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  chain        String   
-  contractAddr String
-  status       String   
-  txHash       String?
-  errorReason  String?
-  createdAt    DateTime @default(now())
-
-  @@index([userId])
+model ChainToggle {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chainName String   // base, ethereum, robinhood, ink, arc
+  enabled   Boolean  @default(true)
+  @@unique([userId, chainName])
 }
