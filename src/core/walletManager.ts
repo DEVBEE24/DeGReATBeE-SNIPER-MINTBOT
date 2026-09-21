@@ -1,51 +1,42 @@
-import { createWalletClient, http, Chain } from 'viem';
-import { privateKeyToAccount, nonceManager } from 'viem/accounts';
+import { PrismaClient } from '@prisma/client';
 import { decryptPrivateKey } from './crypto';
-import { robinhoodChain, inkChain, arcChain } from '../config/chains';
-import { mainnet, base } from 'viem/chains';
+import { privateKeyToAccount } from 'viem/accounts';
+import { PrivateKeyAccount } from 'viem';
 
-export function getChainConfig(chainName: string): Chain {
-  switch (chainName.toLowerCase()) {
-    case 'base':
-      return base;
-    case 'eth':
-    case 'ethereum':
-      return mainnet;
-    case 'robinhood':
-      return robinhoodChain;
-    case 'ink':
-      return inkChain;
-    case 'arc':
-      return arcChain;
-    default:
-      throw new Error(`Unsupported chain configuration: ${chainName}`);
+const prisma = new PrismaClient();
+
+/**
+ * Retrieves and decrypts the default active wallet for a given user as a viem Account signer.
+ */
+export async function getDefaultSignerAccount(userId: string): Promise<PrivateKeyAccount> {
+  const wallet = await prisma.wallet.findFirst({
+    where: {
+      userId,
+      isDefault: true,
+      isActive: true,
+    },
+  });
+
+  if (!wallet) {
+    throw new Error('No active default wallet found. Please generate or import a wallet first.');
   }
+
+  const rawPrivateKey = decryptPrivateKey(wallet.encryptedKey) as `0x${string}`;
+  return privateKeyToAccount(rawPrivateKey);
 }
 
-export function createUserWalletClient(encryptedPrivateKey: string, chainName: string, customRpcUrl?: string) {
-  const rawPrivateKey = decryptPrivateKey(encryptedPrivateKey) as `0x${string}`;
-
-  // Use viem nonceManager for smooth concurrent sequence handling
-  const account = privateKeyToAccount(rawPrivateKey, {
-    nonceManager,
+/**
+ * Retrieves any specific active wallet by ID as a viem Account signer.
+ */
+export async function getSignerAccountById(walletId: string): Promise<PrivateKeyAccount> {
+  const wallet = await prisma.wallet.findUnique({
+    where: { id: walletId },
   });
 
-  const chain = getChainConfig(chainName);
-  const rpcUrl = customRpcUrl || chain.rpcUrls.default.http[0];
+  if (!wallet || !wallet.isActive) {
+    throw new Error('Wallet not found or is currently inactive.');
+  }
 
-  const walletClient = createWalletClient({
-    account,
-    chain,
-    transport: http(rpcUrl, {
-      timeout: 10_000,
-      retryCount: 3,
-      retryDelay: 500,
-    }),
-  });
-
-  return {
-    walletClient,
-    account,
-    address: account.address,
-  };
+  const rawPrivateKey = decryptPrivateKey(wallet.encryptedKey) as `0x${string}`;
+  return privateKeyToAccount(rawPrivateKey);
 }
