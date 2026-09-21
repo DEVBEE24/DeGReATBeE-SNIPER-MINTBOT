@@ -15,12 +15,12 @@ export function getMainDashboardKeyboard(autoMintActive: boolean = false): Inlin
 
 export const backToMenuKeyboard = new InlineKeyboard().text("🏠 Main Menu", "menu_main");
 
-export function getChainSubscriptionsKeyboard(chainStates: { chainName: string; enabled: boolean }[]): InlineKeyboard {
+export function getChainSubscriptionsKeyboard(chains: { chainName: string; enabled: boolean }[]): InlineKeyboard {
   const keyboard = new InlineKeyboard();
   
-  chainStates.forEach((chain) => {
+  chains.forEach((chain) => {
     const checkmark = chain.enabled ? '✅' : '❌';
-    keyboard.text(`${checkmark} ${chain.chainName.toUpperCase()}`, `toggle_chain_${chain.chainName}`).row();
+    keyboard.text(`${checkmark}${chain.chainName.toUpperCase()}`, `toggle_chain_${chain.chainName}`).row();
   });
 
   keyboard.text("🏠 Main Menu", "menu_main");
