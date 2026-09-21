@@ -1,7 +1,7 @@
 {
   "name": "degreatbee-sniper-mintbot",
   "version": "1.0.0",
-  "description": "High-speed multi-chain EVM minting and copy-sniper engine",
+  "description": "Elite multi-chain EVM minting and copy-sniper engine",
   "main": "dist/index.js",
   "scripts": {
     "build": "prisma generate && tsc",
@@ -9,14 +9,14 @@
     "dev": "tsx watch src/index.ts"
   },
   "dependencies": {
-    "@prisma/client": "^5.11.0",
+    "@prisma/client": "^5.22.0",
     "dotenv": "^16.4.5",
     "grammy": "^1.21.1",
     "viem": "^2.21.0"
   },
   "devDependencies": {
     "@types/node": "^20.11.24",
-    "prisma": "^5.11.0",
+    "prisma": "^5.22.0",
     "tsx": "^4.7.1",
     "typescript": "^5.3.3"
   }
