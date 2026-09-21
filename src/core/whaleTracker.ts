@@ -102,30 +102,35 @@ export function startWhaleTracker(config: WhaleListenerConfig) {
 }
 
 export async function startAllWhaleTrackersForUser(userId: string) {
-  const { data: chains } = await supabase
+  const { data: chains, error: chainsErr } = await supabase
     .from('chain_toggles')
     .select('*')
     .eq('user_id', userId)
     .eq('enabled', true);
 
-  const { data: whales } = await supabase
+  const { data: whales, error: whalesErr } = await supabase
     .from('whale_targets')
     .select('*')
     .eq('user_id', userId);
 
-  const { data: settings } = await supabase
+  const { data: settings, error: settingsErr } = await supabase
     .from('user_settings')
     .select('*')
     .eq('user_id', userId)
     .maybeSingle();
 
-  const { data: wallet } = await supabase
+  const { data: wallet, error: walletErr } = await supabase
     .from('wallets')
     .select('*')
     .eq('user_id', userId)
     .eq('is_default', true)
     .eq('is_active', true)
     .maybeSingle();
+
+  if (chainsErr || whalesErr || settingsErr || walletErr) {
+    console.error('[WhaleTracker] Failed to load tracker data:', chainsErr?.message || whalesErr?.message || settingsErr?.message || walletErr?.message);
+    return;
+  }
 
   if (!chains || !whales || !wallet || !settings) return;
 
