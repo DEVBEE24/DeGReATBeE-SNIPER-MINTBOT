@@ -38,6 +38,7 @@ model Wallet {
   encryptedKey   String
   label          String   @default("Sniper Wallet")
   isDefault      Boolean  @default(false)
+  isActive       Boolean  @default(true) // Toggle active/inactive status
   createdAt      DateTime @default(now())
 }
 
