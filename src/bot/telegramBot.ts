@@ -1,6 +1,6 @@
 import { Bot, InlineKeyboard } from 'grammy';
 import { PrismaClient } from '@prisma/client';
-import { encryptPrivateKey } from '../core/crypto';
+import { encryptPrivateKey, decryptPrivateKey } from '../core/crypto';
 import { dispatchMintTransaction } from '../core/dispatcher';
 import { runSecurityAudit } from '../core/scanner';
 import { getChainConfig } from '../core/walletManager';
@@ -10,7 +10,7 @@ import { createPublicClient, http, formatEther, Address } from 'viem';
 const prisma = new PrismaClient();
 const bot = new Bot(process.env.TELEGRAM_BOT_TOKEN || '');
 
-// Exact button matrix matching your professional design
+// Main Menu layout matching your exact professional design
 const getMainMenuKeyboard = (autoMintActive: boolean = false) => {
   return new InlineKeyboard()
     .text("🔍 Scan Contract", "menu_scan").text("👁️ Watchlist", "menu_watchlist").row()
@@ -44,7 +44,7 @@ bot.use(async (ctx, next) => {
             { chainName: 'ethereum', enabled: true },
             { chainName: 'robinhood', enabled: true },
             { chainName: 'ink', enabled: true },
-            { chainName: 'arc', enabled: false },
+            { chainName: 'arc', enabled: true },
           ]
         }
       },
@@ -84,29 +84,90 @@ bot.callbackQuery('menu_main', async (ctx) => {
   await ctx.answerCallbackQuery();
 });
 
+// My Wallets Hub with management options
 bot.callbackQuery('menu_wallets', async (ctx) => {
   const user = (ctx as any).dbUser;
   const wallets = await prisma.wallet.findMany({ where: { userId: user.id } });
 
-  let response = '👛 *Your Configured Wallets:*\n\n';
+  let response = '👛 *Configured Trading Wallets:*\n\n';
+  const keyboard = new InlineKeyboard();
+
   if (wallets.length === 0) {
-    response += '⚠️ No wallets found. Click below to add or generate one.';
+    response += '⚠️ No wallets found. Generate or import one below.';
   } else {
     wallets.forEach((w, index) => {
-      response += `${index + 1}. *${w.label}*${w.isDefault ? '🟢 *(Default)*' : ''}\n   \`${w.address}\`\n\n`;
+      const statusIcon = w.isActive ? '🟢 [Active]' : '🔴 [Inactive]';
+      response += `${index + 1}. *${w.label}*${statusIcon}\n   \`${w.address}\`\n\n`;
+      
+      // Add individual action buttons for each wallet
+      keyboard.text(`🔑 Export #${index+1}`, `wallet_export_${w.id}`)
+              .text(`⚡ Toggle #${index+1}`, `wallet_toggle_${w.id}`).row();
     });
   }
 
-  const keyboard = new InlineKeyboard()
-    .text("🎲 Generate Fresh Wallet", "menu_generate_wallet").row()
-    .text("➕ Import Key (/addwallet)", "menu_import_info").row()
-    .text("🏠 Main Menu", "menu_main");
+  keyboard.text("🎲 Generate Fresh Wallet", "menu_generate_wallet").row()
+          .text("➕ Import Key (/addwallet)", "menu_import_info").row()
+          .text("🏠 Main Menu", "menu_main");
 
   await ctx.editMessageText(response, {
     parse_mode: 'Markdown',
     reply_markup: keyboard,
   });
   await ctx.answerCallbackQuery();
+});
+
+// Wallet Export Handler
+bot.callbackQuery(/^wallet_export_(.+)$/, async (ctx) => {
+  const walletId = ctx.match[1];
+  try {
+    const wallet = await prisma.wallet.findUnique({ where: { id: walletId } });
+    if (!wallet) return ctx.answerCallbackQuery({ text: "Wallet not found." });
+
+    const decryptedKey = decryptPrivateKey(wallet.encryptedKey);
+    await ctx.reply(
+      `🔑 *Exported Private Key for [${wallet.label}]*\n\n` +
+      `Address: \`${wallet.address}\`\n` +
+      `Private Key: \`${decryptedKey}\`\n\n` +
+      `⚠️ *Keep this secure! Delete this message after copying.*`,
+      { parse_mode: 'Markdown' }
+    );
+    await ctx.answerCallbackQuery({ text: "Wallet exported successfully" });
+  } catch (err: any) {
+    await ctx.answerCallbackQuery({ text: `Export failed: ${err.message}` });
+  }
+});
+
+// Wallet Toggle Active/Inactive Handler
+bot.callbackQuery(/^wallet_toggle_(.+)$/, async (ctx) => {
+  const walletId = ctx.match[1];
+  const wallet = await prisma.wallet.findUnique({ where: { id: walletId } });
+  if (!wallet) return ctx.answerCallbackQuery({ text: "Wallet not found." });
+
+  await prisma.wallet.update({
+    where: { id: walletId },
+    data: { isActive: !wallet.isActive }
+  });
+
+  await ctx.answerCallbackQuery({ text: `Wallet ${wallet.label} toggled!` });
+  
+  // Refresh wallet view
+  const user = (ctx as any).dbUser;
+  const wallets = await prisma.wallet.findMany({ where: { userId: user.id } });
+  let response = '👛 *Configured Trading Wallets:*\n\n';
+  const keyboard = new InlineKeyboard();
+
+  wallets.forEach((w, index) => {
+    const statusIcon = w.isActive ? '🟢 [Active]' : '🔴 [Inactive]';
+    response += `${index + 1}. *${w.label}*${statusIcon}\n   \`${w.address}\`\n\n`;
+    keyboard.text(`🔑 Export #${index+1}`, `wallet_export_${w.id}`)
+            .text(`⚡ Toggle #${index+1}`, `wallet_toggle_${w.id}`).row();
+  });
+
+  keyboard.text("🎲 Generate Fresh Wallet", "menu_generate_wallet").row()
+          .text("➕ Import Key (/addwallet)", "menu_import_info").row()
+          .text("🏠 Main Menu", "menu_main");
+
+  await ctx.editMessageText(response, { parse_mode: 'Markdown', reply_markup: keyboard });
 });
 
 bot.callbackQuery('menu_import_info', async (ctx) => {
@@ -133,7 +194,7 @@ bot.callbackQuery('menu_generate_wallet', async (ctx) => {
     const isDefault = existingCount === 0;
 
     await prisma.wallet.create({
-      data: { userId: user.id, address: account.address, encryptedKey, label, isDefault },
+      data: { userId: user.id, address: account.address, encryptedKey, label, isDefault, isActive: true },
     });
 
     await ctx.editMessageText(
@@ -150,6 +211,7 @@ bot.callbackQuery('menu_generate_wallet', async (ctx) => {
   await ctx.answerCallbackQuery();
 });
 
+// Full Chains Hub with checkmarks matching reference design
 bot.callbackQuery('menu_chains', async (ctx) => {
   const user = (ctx as any).dbUser;
   const chains = await prisma.chainToggle.findMany({ where: { userId: user.id } });
@@ -220,13 +282,13 @@ bot.callbackQuery('menu_tracking', async (ctx) => {
 
 bot.callbackQuery('menu_portfolio', async (ctx) => {
   const user = (ctx as any).dbUser;
-  const wallets = await prisma.wallet.findMany({ where: { userId: user.id } });
+  const wallets = await prisma.wallet.findMany({ where: { userId: user.id, isActive: true } });
 
   if (wallets.length === 0) {
-    return ctx.editMessageText('🖼️ *Portfolio*\n\nNo wallets connected.', { parse_mode: 'Markdown', reply_markup: backToMenuKeyboard });
+    return ctx.editMessageText('🖼️ *Portfolio*\n\nNo active wallets connected.', { parse_mode: 'Markdown', reply_markup: backToMenuKeyboard });
   }
 
-  let report = '🖼️ *Live Portfolio Balance Summary:*\n\n';
+  let report = '🖼️ *Live Portfolio Balance Summary (Active Wallets):*\n\n';
   for (const w of wallets) {
     report += `👛 *${w.label}* (\`${w.address.slice(0, 6)}...${w.address.slice(-4)}\`)\n`;
     try {
@@ -366,7 +428,7 @@ bot.command('addwallet', async (ctx) => {
     const account = privateKeyToAccount(rawKey);
     const existingCount = await prisma.wallet.count({ where: { userId: user.id } });
     await prisma.wallet.create({
-      data: { userId: user.id, address: account.address, encryptedKey, label, isDefault: existingCount === 0 },
+      data: { userId: user.id, address: account.address, encryptedKey, label, isDefault: existingCount === 0, isActive: true },
     });
     await ctx.reply(`✅ *Wallet Stored Successfully!*\nAddress: \`${account.address}\``, { parse_mode: 'Markdown', reply_markup: backToMenuKeyboard });
   } catch (err: any) {
@@ -413,8 +475,8 @@ bot.command('snipe', async (ctx) => {
   if (args.length < 2) return ctx.reply('⚠️ *Usage:* `/snipe <chain> <contractAddress> [valueWei]`', { parse_mode: 'Markdown' });
 
   const [chainName, contractAddress, valueWeiStr = '0'] = args;
-  const wallet = await prisma.wallet.findFirst({ where: { userId: user.id, isDefault: true } });
-  if (!wallet) return ctx.reply('❌ No default wallet configured.', { parse_mode: 'Markdown' });
+  const wallet = await prisma.wallet.findFirst({ where: { userId: user.id, isDefault: true, isActive: true } });
+  if (!wallet) return ctx.reply('❌ No active default wallet configured.', { parse_mode: 'Markdown' });
 
   await ctx.reply(`🚀 *Executing WL / Manual Mint on [${chainName.toUpperCase()}]*...`, { parse_mode: 'Markdown' });
 
