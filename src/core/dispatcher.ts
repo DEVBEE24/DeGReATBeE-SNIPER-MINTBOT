@@ -17,6 +17,8 @@ export interface DispatchParams {
   maxEthCap?: string; // Safety budget cap in ETH
 }
 
+export type MintExecutionParams = DispatchParams;
+
 /**
  * Dispatches an EVM mint or sniper transaction securely with gas safety controls.
  */
