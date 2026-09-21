@@ -1,11 +1,12 @@
 import dotenv from 'dotenv';
-import { startTelegramBot } from './bot/telegramBot';
-
 dotenv.config();
 
-function main() {
-  console.log('[Engine] 🚀 Starting Mint-Executor-Engine...');
-  startTelegramBot();
-}
+import { startTelegramBot } from './bot/index.js';
 
-main();
+console.log('[Main] 🚀 Initializing ApexBee Professional Sniper Engine...');
+
+try {
+  startTelegramBot();
+} catch (err) {
+  console.error('[Main] ❌ Critical startup error:', err);
+}
