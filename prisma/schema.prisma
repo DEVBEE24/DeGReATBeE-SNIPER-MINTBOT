@@ -24,6 +24,7 @@ model UserSettings {
   userId            String   @unique
   user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   priorityGwei      String   @default("3.0")
+  maxEthCap         String   @default("0.05") // Maximum ETH cap per tx for safety
   defaultGasLimit   String   @default("0.005")
   slippageTolerance Int      @default(1)
   autoMintActive    Boolean  @default(false)
@@ -37,7 +38,7 @@ model Wallet {
   encryptedKey   String
   label          String   @default("Sniper Wallet")
   isDefault      Boolean  @default(false)
-  createdAt      DateTime @default(now())
+  createdAt      DateTime DateTime @default(now())
 }
 
 model WhaleTarget {
