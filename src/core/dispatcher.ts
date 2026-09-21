@@ -1,105 +1,68 @@
-import { Address, parseUnits } from 'viem';
-import { createUserWalletClient, getChainConfig } from './walletManager';
+import { createWalletClient, http, parseEther, Address } from 'viem';
+import { privateKeyToAccount } from 'viem/accounts';
+import { getChainConfig } from '../config/chains';
 import { runPreFlightCheck } from './scanner';
+import { decryptPrivateKey } from './crypto';
 
-export interface MintExecutionParams {
+export interface DispatchParams {
   encryptedPrivateKey: string;
   chainName: string;
   contractAddress: Address;
-  abi: any;
+  abi: any[];
   functionName: string;
-  args?: any[];
-  valueWei?: bigint;
+  args: any[];
+  valueWei: bigint;
   maxPriorityFeeGwei?: string;
   maxFeePerGasGwei?: string;
-  customRpcUrl?: string;
+  maxEthCap?: string; // Safety budget cap in ETH
 }
 
-export interface ExecutionResult {
-  success: boolean;
-  txHash?: string;
-  error?: string;
-}
-
-export async function dispatchMintTransaction(params: MintExecutionParams): Promise<ExecutionResult> {
-  const {
-    encryptedPrivateKey,
-    chainName,
-    contractAddress,
-    abi,
-    functionName,
-    args = [],
-    valueWei = 0n,
-    maxPriorityFeeGwei = '3.0',
-    maxFeePerGasGwei = '30.0',
-    customRpcUrl,
-  } = params;
-
+/**
+ * Dispatches an EVM mint or sniper transaction securely with gas safety controls.
+ */
+export async function dispatchMintTransaction(params: DispatchParams) {
   try {
-    const { walletClient, account } = createUserWalletClient(
-      encryptedPrivateKey,
-      chainName,
-      customRpcUrl
-    );
+    const chain = getChainConfig(params.chainName);
+    const rpcUrl = chain.rpcUrls.default.http[0];
 
-    const chain = getChainConfig(chainName);
-    const transportUrl = customRpcUrl || chain.rpcUrls.default.http[0];
-
-    // Pre-flight check before simulating
-    const preFlight = await runPreFlightCheck(chainName, contractAddress, transportUrl, valueWei);
+    // 1. Pre-flight security audit verification
+    const preFlight = await runPreFlightCheck(params.chainName, params.contractAddress, rpcUrl, params.valueWei);
     if (!preFlight.isValid) {
-      return {
-        success: false,
-        error: `Pre-flight validation failed: ${preFlight.error}`,
-      };
+      return { success: false, error: `Pre-flight failed: ${preFlight.error}` };
     }
 
-    const { createPublicClient, http } = await import('viem');
-    const publicClient = createPublicClient({
-      chain,
-      transport: http(transportUrl, { timeout: 5000 }),
-    });
-
-    // Simulate transaction to prevent wasted gas
-    try {
-      await publicClient.simulateContract({
-        account,
-        address: contractAddress,
-        abi,
-        functionName,
-        args,
-        value: valueWei,
-      });
-    } catch (simError: any) {
-      return {
-        success: false,
-        error: `Simulation reverted: ${simError.shortMessage || simError.message}`,
-      };
+    // 2. Enforce Max ETH Safety Cap
+    if (params.maxEthCap) {
+      const maxCapWei = parseEther(params.maxEthCap);
+      if (params.valueWei > maxCapWei) {
+        return { 
+          success: false, 
+          error: `Aborted: Value (${params.valueWei} wei) exceeds Max ETH Safety Cap (${params.maxEthCap} ETH).` 
+        };
+      }
     }
 
-    const maxPriorityFeePerGas = parseUnits(maxPriorityFeeGwei, 9);
-    const maxFeePerGas = parseUnits(maxFeePerGasGwei, 9);
+    // 3. Decrypt wallet and initialize viem wallet client
+    const rawPrivateKey = decryptPrivateKey(params.encryptedPrivateKey) as `0x${string}`;
+    const account = privateKeyToAccount(rawPrivateKey);
 
-    const txHash = await walletClient.writeContract({
-      address: contractAddress,
-      abi,
-      functionName,
-      args,
-      value: valueWei,
-      maxPriorityFeePerGas,
-      maxFeePerGas,
-      chain,
+    const walletClient = createWalletClient({
       account,
+      chain,
+      transport: http(rpcUrl),
     });
 
-    return {
-      success: true,
-      txHash,
-    };
+    // 4. Execute contract write transaction
+    const hash = await walletClient.writeContract({
+      address: params.contractAddress,
+      abi: params.abi,
+      functionName: params.functionName,
+      args: params.args,
+      value: params.valueWei,
+    });
+
+    return { success: true, txHash: hash };
   } catch (err: any) {
-    return {
-      success: false,
-      error: `Execution dispatch error: ${err.shortMessage || err.message || err}`,
-    };
+    return { success: false, error: err.message || 'Transaction execution reverted.' };
   }
 }
