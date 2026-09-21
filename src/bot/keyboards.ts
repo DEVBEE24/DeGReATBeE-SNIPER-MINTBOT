@@ -9,7 +9,7 @@ import { InlineKeyboard } from 'grammy';
 export function getMainDashboardKeyboard(autoMintActive: boolean = false): InlineKeyboard {
   return new InlineKeyboard()
     .text("🔍 Scan Contract", "menu_scan").text("👁️ Watchlist", "menu_watchlist").row()
-    .text("💼 My Wallets", "menu_wallets").text("⚙️ Chains Hub", "menu_chains").row()
+    .text("💼 My Wallets", "menu_wallets").text("⚙️ Chains", "menu_chains").row()
     .text("🖼️ My Portfolio", "menu_portfolio").text("🎯 Tracking", "menu_tracking").row()
     .text("🛡️ Settings / Gas", "menu_settings").text("📖 Help", "menu_help").row()
     .text(autoMintActive ? "⚡ Auto-Mint: ON" : "⚡ Auto-Mint: OFF", "menu_toggle_automint");
@@ -24,7 +24,7 @@ export function getChainSubscriptionsKeyboard(chainStates: { chainName: string; 
   
   chainStates.forEach((chain) => {
     const checkmark = chain.enabled ? '✅' : '❌';
-    keyboard.text(`${checkmark} ${chain.chainName.toUpperCase()}`, `toggle_chain_${chain.chainName}`).row();
+    keyboard.text(`${checkmark}${chain.chainName.toUpperCase()}`, `toggle_chain_${chain.chainName}`).row();
   });
 
   keyboard.text("🏠 Main Menu", "menu_main");
@@ -35,6 +35,6 @@ export function getChainSubscriptionsKeyboard(chainStates: { chainName: string; 
 export function getWalletManagementKeyboard(): InlineKeyboard {
   return new InlineKeyboard()
     .text("🎲 Generate Fresh Wallet", "menu_generate_wallet").row()
-    .text("📥 Import Private Key", "menu_import_info").row()
+    .text("➕ Import Private Key", "menu_import_info").row()
     .text("🏠 Main Menu", "menu_main");
 }
