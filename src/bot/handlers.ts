@@ -2,10 +2,17 @@ import { InlineKeyboard } from 'grammy';
 import { PrismaClient } from '@prisma/client';
 import { decryptPrivateKey } from '../core/crypto';
 import { createWalletForUser } from '../core/wallet';
-import { backToMenuKeyboard, getMainDashboardKeyboard } from './keyboards';
-import { SUPPORTED_NETWORKS } from '../config/chains';
+import { backToMenuKeyboard, getMainDashboardKeyboard, getChainSubscriptionsKeyboard } from './keyboard';
 
 const prisma = new PrismaClient();
+
+const SUPPORTED_NETWORKS = [
+  { chainName: 'base', name: 'Base' },
+  { chainName: 'ethereum', name: 'Ethereum' },
+  { chainName: 'robinhood', name: 'Robinhood Chain' },
+  { chainName: 'ink', name: 'Ink' },
+  { chainName: 'arc', name: 'Arc' },
+];
 
 export function registerHandlers(bot: any) {
   // Main Menu Callback
@@ -57,7 +64,6 @@ export function registerHandlers(bot: any) {
     });
     await ctx.answerCallbackQuery({ text: `Wallet status updated!` });
     
-    // Refresh wallet view
     const user = ctx.dbUser;
     const wallets = await prisma.wallet.findMany({ where: { userId: user.id } });
     let response = '👛 *Configured Trading Wallets:*\n\n';
@@ -122,23 +128,26 @@ export function registerHandlers(bot: any) {
     await ctx.answerCallbackQuery();
   });
 
-  // Chains Hub (Checkmark Toggles)
+  // Self-Healing Chains Hub (Checkmark Toggles)
   bot.callbackQuery('menu_chains', async (ctx: any) => {
     const user = ctx.dbUser;
-    const chains = await prisma.chainToggle.findMany({ where: { userId: user.id } });
+    const chainStates = [];
 
-    const keyboard = new InlineKeyboard();
-    SUPPORTED_NETWORKS.forEach((net) => {
-      const toggle = chains.find((c: any) => c.chainName === net.chainName);
-      const isEnabled = toggle ? toggle.enabled : true;
-      const checkmark = isEnabled ? '✅' : '❌';
-      keyboard.text(`${checkmark}${net.name}`, `toggle_chain_${net.chainName}`).row();
-    });
-    keyboard.text("🏠 Main Menu", "menu_main");
+    for (const net of SUPPORTED_NETWORKS) {
+      let toggle = await prisma.chainToggle.findUnique({
+        where: { userId_chainName: { userId: user.id, chainName: net.chainName } }
+      });
+      if (!toggle) {
+        toggle = await prisma.chainToggle.create({
+          data: { userId: user.id, chainName: net.chainName, enabled: true }
+        });
+      }
+      chainStates.push({ chainName: net.chainName, enabled: toggle.enabled });
+    }
 
     await ctx.editMessageText(
       `⚙️ *Alert & Execution Subscriptions*\n\nTap any network below to toggle execution status instantly:`,
-      { parse_mode: 'Markdown', reply_markup: keyboard }
+      { parse_mode: 'Markdown', reply_markup: getChainSubscriptionsKeyboard(chainStates) }
     );
     await ctx.answerCallbackQuery();
   });
@@ -162,19 +171,22 @@ export function registerHandlers(bot: any) {
       });
     }
 
-    const chains = await prisma.chainToggle.findMany({ where: { userId: user.id } });
-    const keyboard = new InlineKeyboard();
-    SUPPORTED_NETWORKS.forEach((net) => {
-      const toggle = chains.find((c: any) => c.chainName === net.chainName);
-      const isEnabled = toggle ? toggle.enabled : true;
-      const checkmark = isEnabled ? '✅' : '❌';
-      keyboard.text(`${checkmark}${net.name}`, `toggle_chain_${net.chainName}`).row();
-    });
-    keyboard.text("🏠 Main Menu", "menu_main");
+    const chainStates = [];
+    for (const net of SUPPORTED_NETWORKS) {
+      let toggle = await prisma.chainToggle.findUnique({
+        where: { userId_chainName: { userId: user.id, chainName: net.chainName } }
+      });
+      if (!toggle) {
+        toggle = await prisma.chainToggle.create({
+          data: { userId: user.id, chainName: net.chainName, enabled: true }
+        });
+      }
+      chainStates.push({ chainName: net.chainName, enabled: toggle.enabled });
+    }
 
     await ctx.editMessageText(`⚙️ *Alert & Execution Subscriptions*\n\nUpdated [${chainName.toUpperCase()}] status:`, {
       parse_mode: 'Markdown',
-      reply_markup: keyboard,
+      reply_markup: getChainSubscriptionsKeyboard(chainStates),
     });
     await ctx.answerCallbackQuery({ text: `Toggled ${chainName}` });
   });
