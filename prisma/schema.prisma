@@ -24,7 +24,7 @@ model UserSettings {
   userId            String   @unique
   user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   priorityGwei      String   @default("3.0")
-  maxEthCap         String   @default("0.05")
+  maxEthCap         String   @default("0.05") // Max ETH safety cap per transaction
   defaultGasLimit   String   @default("0.005")
   slippageTolerance Int      @default(1)
   autoMintActive    Boolean  @default(false)
@@ -38,7 +38,7 @@ model Wallet {
   encryptedKey   String
   label          String   @default("Sniper Wallet")
   isDefault      Boolean  @default(false)
-  isActive       Boolean  @default(true) // Toggle active/inactive status
+  isActive       Boolean  @default(true) // Individual wallet active/inactive toggle
   createdAt      DateTime @default(now())
 }
 
