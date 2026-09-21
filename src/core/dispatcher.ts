@@ -15,6 +15,7 @@ export interface DispatchParams {
   maxPriorityFeeGwei?: string;
   maxFeePerGasGwei?: string;
   maxEthCap?: string; // Safety budget cap in ETH
+  customRpcUrl?: string; // Added to support custom RPC overrides
 }
 
 export type MintExecutionParams = DispatchParams;
@@ -25,7 +26,7 @@ export type MintExecutionParams = DispatchParams;
 export async function dispatchMintTransaction(params: DispatchParams) {
   try {
     const chain = getChainConfig(params.chainName);
-    const rpcUrl = chain.rpcUrls.default.http[0];
+    const rpcUrl = params.customRpcUrl || chain.rpcUrls.default.http[0];
 
     // 1. Pre-flight security audit verification
     const preFlight = await runPreFlightCheck(params.chainName, params.contractAddress, rpcUrl, params.valueWei);
