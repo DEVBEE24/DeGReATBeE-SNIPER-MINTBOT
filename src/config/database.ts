@@ -86,8 +86,12 @@ export async function initDatabase() {
           status VARCHAR(50) DEFAULT 'staged',
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+
+      -- Safe self-healing column additions for existing tables
+      ALTER TABLE IF EXISTS watchlist_targets ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'staged';
+      ALTER TABLE IF EXISTS mint_schedules ADD COLUMN IF NOT EXISTS executed BOOLEAN DEFAULT FALSE;
     `);
-    console.log('[Database] 🟢 All database tables verified and initialized successfully.');
+    console.log('[Database] 🟢 All database tables and columns verified successfully.');
   } finally {
     client.release();
   }
