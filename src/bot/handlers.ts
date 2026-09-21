@@ -2,7 +2,7 @@ import { InlineKeyboard } from 'grammy';
 import { PrismaClient } from '@prisma/client';
 import { decryptPrivateKey } from '../core/crypto';
 import { createWalletForUser } from '../core/wallet';
-import { backToMenuKeyboard, getMainDashboardKeyboard, getChainSubscriptionsKeyboard } from './keyboard';
+import { backToMenuKeyboard, getMainDashboardKeyboard, getChainSubscriptionsKeyboard } from './keyboards';
 
 const prisma = new PrismaClient();
 
