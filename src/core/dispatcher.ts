@@ -14,38 +14,38 @@ export interface DispatchParams {
   valueWei: bigint;
   maxPriorityFeeGwei?: string;
   maxFeePerGasGwei?: string;
-  maxEthCap?: string; // Safety budget cap in ETH
-  customRpcUrl?: string; // Added to support custom RPC overrides
+  maxEthCap?: string;
+  customRpcUrl?: string;
 }
 
 export type MintExecutionParams = DispatchParams;
 
-/**
- * Dispatches an EVM mint or sniper transaction securely with gas safety controls.
- */
-export async function dispatchMintTransaction(params: DispatchParams) {
+export interface DispatchResult {
+  success: boolean;
+  txHash?: string;
+  error?: string;
+}
+
+export async function dispatchMintTransaction(params: DispatchParams): Promise<DispatchResult> {
   try {
     const chain = getChainConfig(params.chainName);
     const rpcUrl = params.customRpcUrl || chain.rpcUrls.default.http[0];
 
-    // 1. Pre-flight security audit verification
     const preFlight = await runPreFlightCheck(params.chainName, params.contractAddress, rpcUrl, params.valueWei);
     if (!preFlight.isValid) {
       return { success: false, error: `Pre-flight failed: ${preFlight.error}` };
     }
 
-    // 2. Enforce Max ETH Safety Cap
     if (params.maxEthCap) {
       const maxCapWei = parseEther(params.maxEthCap);
       if (params.valueWei > maxCapWei) {
-        return { 
-          success: false, 
-          error: `Aborted: Value (${params.valueWei} wei) exceeds Max ETH Safety Cap (${params.maxEthCap} ETH).` 
+        return {
+          success: false,
+          error: `Aborted: Value (${params.valueWei} wei) exceeds Max ETH Safety Cap (${params.maxEthCap} ETH).`,
         };
       }
     }
 
-    // 3. Decrypt wallet and initialize viem wallet client
     const rawPrivateKey = decryptPrivateKey(params.encryptedPrivateKey) as `0x${string}`;
     const account = privateKeyToAccount(rawPrivateKey);
 
@@ -55,17 +55,28 @@ export async function dispatchMintTransaction(params: DispatchParams) {
       transport: http(rpcUrl),
     });
 
-    // 4. Execute contract write transaction
     const hash = await walletClient.writeContract({
       address: params.contractAddress,
       abi: params.abi,
       functionName: params.functionName,
       args: params.args,
       value: params.valueWei,
+      account,
     });
 
     return { success: true, txHash: hash };
   } catch (err: any) {
     return { success: false, error: err.message || 'Transaction execution reverted.' };
   }
+}
+
+export function parseWeiValue(valueStr: string): bigint {
+  const trimmed = valueStr.trim();
+  if (trimmed.startsWith('0x')) {
+    return BigInt(trimmed);
+  }
+  if (/^\d+$/.test(trimmed)) {
+    return BigInt(trimmed);
+  }
+  return parseEther(trimmed);
 }

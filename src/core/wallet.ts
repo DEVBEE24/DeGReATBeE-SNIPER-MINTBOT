@@ -1,23 +1,34 @@
-import { PrismaClient } from '@prisma/client';
+import { supabase } from '../config/supabase';
 import { encryptPrivateKey } from './crypto';
 import { privateKeyToAccount, generatePrivateKey } from 'viem/accounts';
+import { Wallet } from '../types/database';
 
-const prisma = new PrismaClient();
-
-export async function createWalletForUser(userId: string, label?: string) {
+export async function createWalletForUser(userId: string, label?: string): Promise<Wallet> {
   const rawKey = generatePrivateKey();
   const account = privateKeyToAccount(rawKey);
   const encryptedKey = encryptPrivateKey(rawKey);
-  const count = await prisma.wallet.count({ where: { userId } });
 
-  return prisma.wallet.create({
-    data: {
-      userId,
+  const { data: existingWallets, error: countError } = await supabase
+    .from('wallets')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', userId);
+
+  if (countError) throw countError;
+  const count = existingWallets?.length ?? 0;
+
+  const { data, error } = await supabase
+    .from('wallets')
+    .insert({
+      user_id: userId,
       address: account.address,
-      encryptedKey,
+      encrypted_key: encryptedKey,
       label: label || `Sniper Wallet #${count + 1}`,
-      isDefault: count === 0,
-      isActive: true,
-    },
-  });
+      is_default: count === 0,
+      is_active: true,
+    })
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data as Wallet;
 }
