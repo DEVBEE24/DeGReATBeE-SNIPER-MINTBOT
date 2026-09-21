@@ -1,9 +1,8 @@
 import { createPublicClient, http, Address } from 'viem';
 import { getChainConfig } from '../config/chains';
 import { dispatchMintTransaction, MintExecutionParams } from './dispatcher';
-import { supabase } from '../config/supabase';
-import { decryptPrivateKey } from './crypto';
-import { privateKeyToAccount } from 'viem/accounts';
+import { query, queryOne } from '../config/database';
+import { ChainToggle, UserSettings, Wallet, WhaleTarget } from '../types/database';
 
 export interface WhaleListenerConfig {
   chainName: string;
@@ -102,37 +101,27 @@ export function startWhaleTracker(config: WhaleListenerConfig) {
 }
 
 export async function startAllWhaleTrackersForUser(userId: string) {
-  const { data: chains, error: chainsErr } = await supabase
-    .from('chain_toggles')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('enabled', true);
+  const chains = await query<ChainToggle>(
+    `SELECT * FROM chain_toggles WHERE user_id = $1 AND enabled = true`,
+    [userId]
+  );
 
-  const { data: whales, error: whalesErr } = await supabase
-    .from('whale_targets')
-    .select('*')
-    .eq('user_id', userId);
+  const whales = await query<WhaleTarget>(
+    `SELECT * FROM whale_targets WHERE user_id = $1`,
+    [userId]
+  );
 
-  const { data: settings, error: settingsErr } = await supabase
-    .from('user_settings')
-    .select('*')
-    .eq('user_id', userId)
-    .maybeSingle();
+  const settings = await queryOne<UserSettings>(
+    `SELECT * FROM user_settings WHERE user_id = $1 LIMIT 1`,
+    [userId]
+  );
 
-  const { data: wallet, error: walletErr } = await supabase
-    .from('wallets')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('is_default', true)
-    .eq('is_active', true)
-    .maybeSingle();
+  const wallet = await queryOne<Wallet>(
+    `SELECT * FROM wallets WHERE user_id = $1 AND is_default = true AND is_active = true LIMIT 1`,
+    [userId]
+  );
 
-  if (chainsErr || whalesErr || settingsErr || walletErr) {
-    console.error('[WhaleTracker] Failed to load tracker data:', chainsErr?.message || whalesErr?.message || settingsErr?.message || walletErr?.message);
-    return;
-  }
-
-  if (!chains || !whales || !wallet || !settings) return;
+  if (!chains.length || !whales.length || !wallet || !settings) return;
 
   const whaleByChain = new Map<string, Address[]>();
   for (const w of whales) {

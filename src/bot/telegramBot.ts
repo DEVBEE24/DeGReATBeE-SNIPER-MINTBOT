@@ -1,10 +1,10 @@
 import { Bot } from 'grammy';
-import { supabase } from '../config/supabase';
+import { pool, query, queryOne } from '../config/database';
 import { registerCommands } from './command';
 import { registerHandlers } from './handlers';
 import { interceptAddressMessage } from '../core/interceptor';
 import { SUPPORTED_NETWORKS } from '../config/chains';
-import { UserWithRelations } from '../types/database';
+import { User, UserSettings, Wallet, WhaleTarget, ChainToggle, UserWithRelations } from '../types/database';
 
 const bot = new Bot(process.env.TELEGRAM_BOT_TOKEN || '');
 
@@ -12,60 +12,74 @@ bot.use(async (ctx, next) => {
   if (!ctx.from) return;
   const telegramId = ctx.from.id.toString();
 
-  let { data: user } = await supabase
-    .from('users')
-    .select(`
-      *,
-      settings:user_settings(*),
-      wallets(*),
-      whale_targets(*),
-      chain_toggles(*)
-    `)
-    .eq('telegram_id', telegramId)
-    .maybeSingle();
+  let user = await queryOne<User & { settings?: UserSettings; wallets?: Wallet[]; whale_targets?: WhaleTarget[]; chain_toggles?: ChainToggle[] }>(
+    `SELECT * FROM users WHERE telegram_id = $1`,
+    [telegramId]
+  );
 
   if (!user) {
-    const { data: newUser, error } = await supabase
-      .from('users')
-      .insert({
-        telegram_id: telegramId,
-        username: ctx.from.username || ctx.from.first_name,
-      })
-      .select()
-      .single();
+    const newUser = await queryOne<User>(
+      `INSERT INTO users (telegram_id, username) VALUES ($1, $2) RETURNING *`,
+      [telegramId, ctx.from.username || ctx.from.first_name]
+    );
 
-    if (error) {
-      console.error('[TelegramBot] Failed to create user:', error.message);
+    if (!newUser) {
+      console.error('[TelegramBot] Failed to create user');
       return;
     }
 
-    await supabase.from('user_settings').insert({
-      user_id: newUser.id,
-    });
+    await pool.query(
+      `INSERT INTO user_settings (user_id) VALUES ($1)`,
+      [newUser.id]
+    );
 
     await Promise.all(
       SUPPORTED_NETWORKS.map((net) =>
-        supabase.from('chain_toggles').insert({
-          user_id: newUser.id,
-          chain_name: net.chainName,
-          enabled: true,
-        })
+        pool.query(
+          `INSERT INTO chain_toggles (user_id, chain_name, enabled) VALUES ($1, $2, true)`,
+          [newUser.id, net.chainName]
+        )
       )
     );
 
-    const { data: refetched } = await supabase
-      .from('users')
-      .select(`
-        *,
-        settings:user_settings(*),
-        wallets(*),
-        whale_targets(*),
-        chain_toggles(*)
-      `)
-      .eq('id', newUser.id)
-      .maybeSingle();
+    user = await queryOne<any>(
+      `SELECT
+        u.*,
+        COALESCE(json_agg(DISTINCT w.*) FILTER (WHERE w.id IS NOT NULL), '[]') AS wallets,
+        COALESCE(json_agg(DISTINCT wt.*) FILTER (WHERE wt.id IS NOT NULL), '[]') AS whale_targets,
+        COALESCE(json_agg(DISTINCT ct.*) FILTER (WHERE ct.id IS NOT NULL), '[]') AS chain_toggles,
+        s.* AS settings
+      FROM users u
+      LEFT JOIN wallets w ON w.user_id = u.id
+      LEFT JOIN whale_targets wt ON wt.user_id = u.id
+      LEFT JOIN chain_toggles ct ON ct.user_id = u.id
+      LEFT JOIN user_settings s ON s.user_id = u.id
+      WHERE u.id = $1
+      GROUP BY u.id, s.id`,
+      [newUser.id]
+    );
+  } else {
+    const settings = await queryOne<UserSettings>(
+      `SELECT * FROM user_settings WHERE user_id = $1`,
+      [user.id]
+    );
+    const wallets = await query<Wallet>(
+      `SELECT * FROM wallets WHERE user_id = $1`,
+      [user.id]
+    );
+    const whaleTargets = await query<WhaleTarget>(
+      `SELECT * FROM whale_targets WHERE user_id = $1`,
+      [user.id]
+    );
+    const chainToggles = await query<ChainToggle>(
+      `SELECT * FROM chain_toggles WHERE user_id = $1`,
+      [user.id]
+    );
 
-    user = refetched;
+    user.settings = settings || null;
+    user.wallets = wallets;
+    user.whale_targets = whaleTargets;
+    user.chain_toggles = chainToggles;
   }
 
   (ctx as any).dbUser = user as UserWithRelations;

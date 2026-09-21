@@ -1,5 +1,5 @@
 import { InlineKeyboard } from 'grammy';
-import { supabase } from '../config/supabase';
+import { pool, query, queryOne } from '../config/database';
 import { decryptPrivateKey } from '../core/crypto';
 import { createWalletForUser } from '../core/wallet';
 import { backToMenuKeyboard, getMainDashboardKeyboard, getChainSubscriptionsKeyboard, getWalletListKeyboard, getSettingsKeyboard, getScheduleListKeyboard, getWatchlistKeyboard } from './keyboards';
@@ -25,14 +25,13 @@ export function registerHandlers(bot: any) {
   // Wallets Hub
   bot.callbackQuery('menu_wallets', async (ctx: any) => {
     const user: UserWithRelations = ctx.dbUser;
-    const { data: wallets } = await supabase
-      .from('wallets')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: true });
+    const wallets = await query<any>(
+      `SELECT * FROM wallets WHERE user_id = $1 ORDER BY created_at ASC`,
+      [user.id]
+    );
 
     let response = '👛 *Configured Trading Wallets:*\n\n';
-    if (!wallets || wallets.length === 0) {
+    if (wallets.length === 0) {
       response += '⚠️ No wallets found. Generate or import one below.';
     } else {
       wallets.forEach((w: any, index: number) => {
@@ -42,9 +41,7 @@ export function registerHandlers(bot: any) {
       });
     }
 
-    const keyboard = getWalletListKeyboard(wallets || []);
-
-    await ctx.editMessageText(response, { parse_mode: 'Markdown', reply_markup: keyboard });
+    await ctx.editMessageText(response, { parse_mode: 'Markdown', reply_markup: getWalletListKeyboard(wallets) });
     await ctx.answerCallbackQuery();
   });
 
@@ -53,45 +50,42 @@ export function registerHandlers(bot: any) {
     const walletId = ctx.match[1];
     const user: UserWithRelations = ctx.dbUser;
 
-    const { data: wallet } = await supabase
-      .from('wallets')
-      .select('*')
-      .eq('id', walletId)
-      .maybeSingle();
+    const wallet = await queryOne<any>(
+      `SELECT * FROM wallets WHERE id = $1 LIMIT 1`,
+      [walletId]
+    );
 
     if (!wallet) return ctx.answerCallbackQuery({ text: 'Wallet not found.' });
 
-    await supabase
-      .from('wallets')
-      .update({ is_active: !wallet.is_active })
-      .eq('id', walletId);
+    await pool.query(
+      `UPDATE wallets SET is_active = $2 WHERE id = $1`,
+      [walletId, !wallet.is_active]
+    );
 
     await ctx.answerCallbackQuery({ text: 'Wallet status updated!' });
 
-    const { data: wallets } = await supabase
-      .from('wallets')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: true });
+    const wallets = await query<any>(
+      `SELECT * FROM wallets WHERE user_id = $1 ORDER BY created_at ASC`,
+      [user.id]
+    );
 
     let response = '👛 *Configured Trading Wallets:*\n\n';
-    (wallets || []).forEach((w: any, index: number) => {
+    wallets.forEach((w: any, index: number) => {
       const statusIcon = w.is_active ? '🟢 [Active]' : '🔴 [Inactive]';
       const defaultIcon = w.is_default ? '⭐' : '';
       response += `${index + 1}. ${defaultIcon} *${w.label}* ${statusIcon}\n   \`${w.address}\`\n\n`;
     });
 
-    await ctx.editMessageText(response, { parse_mode: 'Markdown', reply_markup: getWalletListKeyboard(wallets || []) });
+    await ctx.editMessageText(response, { parse_mode: 'Markdown', reply_markup: getWalletListKeyboard(wallets) });
   });
 
   // Wallet Export
   bot.callbackQuery(/^wallet_export_(.+)$/, async (ctx: any) => {
     const walletId = ctx.match[1];
-    const { data: wallet } = await supabase
-      .from('wallets')
-      .select('*')
-      .eq('id', walletId)
-      .maybeSingle();
+    const wallet = await queryOne<any>(
+      `SELECT * FROM wallets WHERE id = $1 LIMIT 1`,
+      [walletId]
+    );
 
     if (!wallet) return ctx.answerCallbackQuery({ text: 'Wallet not found.' });
 
@@ -141,25 +135,23 @@ export function registerHandlers(bot: any) {
 
     await Promise.all(
       SUPPORTED_NETWORKS.map((net) =>
-        supabase
-          .from('chain_toggles')
-          .upsert({
-            user_id: user.id,
-            chain_name: net.chainName,
-            enabled: true,
-          }, { onConflict: 'user_id,chain_name' })
+        pool.query(
+          `INSERT INTO chain_toggles (user_id, chain_name, enabled)
+           VALUES ($1, $2, true)
+           ON CONFLICT (user_id, chain_name) DO NOTHING`,
+          [user.id, net.chainName]
+        )
       )
     );
 
-    const { data: chains } = await supabase
-      .from('chain_toggles')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('chain_name', { ascending: true });
+    const chains = await query<any>(
+      `SELECT * FROM chain_toggles WHERE user_id = $1 ORDER BY chain_name ASC`,
+      [user.id]
+    );
 
     await ctx.editMessageText(
       `⚙️ *Alert & Execution Subscriptions*\n\nTap any network below to toggle execution status instantly:`,
-      { parse_mode: 'Markdown', reply_markup: getChainSubscriptionsKeyboard(chains || []) }
+      { parse_mode: 'Markdown', reply_markup: getChainSubscriptionsKeyboard(chains) }
     );
     await ctx.answerCallbackQuery();
   });
@@ -169,35 +161,31 @@ export function registerHandlers(bot: any) {
     const user: UserWithRelations = ctx.dbUser;
     const chainName = ctx.match[1];
 
-    const { data: current } = await supabase
-      .from('chain_toggles')
-      .select('*')
-      .eq('user_id', user.id)
-      .eq('chain_name', chainName)
-      .maybeSingle();
+    const current = await queryOne<any>(
+      `SELECT * FROM chain_toggles WHERE user_id = $1 AND chain_name = $2 LIMIT 1`,
+      [user.id, chainName]
+    );
 
     if (current) {
-      await supabase
-        .from('chain_toggles')
-        .update({ enabled: !current.enabled })
-        .eq('id', current.id);
+      await pool.query(
+        `UPDATE chain_toggles SET enabled = $3 WHERE id = $1 AND user_id = $2`,
+        [current.id, user.id, !current.enabled]
+      );
     } else {
-      await supabase.from('chain_toggles').insert({
-        user_id: user.id,
-        chain_name: chainName,
-        enabled: true,
-      });
+      await pool.query(
+        `INSERT INTO chain_toggles (user_id, chain_name, enabled) VALUES ($1, $2, true)`,
+        [user.id, chainName]
+      );
     }
 
-    const { data: chains } = await supabase
-      .from('chain_toggles')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('chain_name', { ascending: true });
+    const chains = await query<any>(
+      `SELECT * FROM chain_toggles WHERE user_id = $1 ORDER BY chain_name ASC`,
+      [user.id]
+    );
 
     await ctx.editMessageText(`⚙️ *Alert & Execution Subscriptions*\n\nUpdated [${chainName.toUpperCase()}] status:`, {
       parse_mode: 'Markdown',
-      reply_markup: getChainSubscriptionsKeyboard(chains || []),
+      reply_markup: getChainSubscriptionsKeyboard(chains),
     });
     await ctx.answerCallbackQuery({ text: `Toggled ${chainName}` });
   });
@@ -205,14 +193,13 @@ export function registerHandlers(bot: any) {
   // Tracking Hub
   bot.callbackQuery('menu_tracking', async (ctx: any) => {
     const user: UserWithRelations = ctx.dbUser;
-    const { data: targets } = await supabase
-      .from('whale_targets')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: true });
+    const targets = await query<any>(
+      `SELECT * FROM whale_targets WHERE user_id = $1 ORDER BY created_at ASC`,
+      [user.id]
+    );
 
     let response = '🎯 *Whale Copy-Snipe Tracking Hub*\n\n';
-    if (!targets || targets.length === 0) {
+    if (targets.length === 0) {
       response += '⚠️ No active whale wallets tracked.\n\n';
     } else {
       targets.forEach((t: any, i: number) => {
@@ -255,14 +242,13 @@ export function registerHandlers(bot: any) {
   // Watchlist
   bot.callbackQuery('menu_watchlist', async (ctx: any) => {
     const user: UserWithRelations = ctx.dbUser;
-    const { data: targets } = await supabase
-      .from('watchlist_targets')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: true });
+    const targets = await query<any>(
+      `SELECT * FROM watchlist_targets WHERE user_id = $1 ORDER BY created_at ASC`,
+      [user.id]
+    );
 
     let response = '👁️ *Active Watchlist*\n\n';
-    if (!targets || targets.length === 0) {
+    if (targets.length === 0) {
       response += 'No active target contracts in watchlist.\n\n';
     } else {
       targets.forEach((t: any, i: number) => {
@@ -274,7 +260,7 @@ export function registerHandlers(bot: any) {
 
     response += `*To add:* \`/watchlist <chain> <contractAddress> [label]\``;
 
-    await ctx.editMessageText(response, { parse_mode: 'Markdown', reply_markup: getWatchlistKeyboard(targets || []) });
+    await ctx.editMessageText(response, { parse_mode: 'Markdown', reply_markup: getWatchlistKeyboard(targets) });
     await ctx.answerCallbackQuery();
   });
 
@@ -283,16 +269,18 @@ export function registerHandlers(bot: any) {
     const targetId = ctx.match[1];
     const user: UserWithRelations = ctx.dbUser;
 
-    await supabase.from('watchlist_targets').delete().eq('id', targetId).eq('user_id', user.id);
+    await pool.query(
+      `DELETE FROM watchlist_targets WHERE id = $1 AND user_id = $2`,
+      [targetId, user.id]
+    );
 
-    const { data: targets } = await supabase
-      .from('watchlist_targets')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: true });
+    const targets = await query<any>(
+      `SELECT * FROM watchlist_targets WHERE user_id = $1 ORDER BY created_at ASC`,
+      [user.id]
+    );
 
     let response = '👁️ *Active Watchlist*\n\n';
-    if (!targets || targets.length === 0) {
+    if (targets.length === 0) {
       response += 'No active target contracts in watchlist.\n\n';
     } else {
       targets.forEach((t: any, i: number) => {
@@ -301,31 +289,27 @@ export function registerHandlers(bot: any) {
     }
     response += `*To add:* \`/watchlist <chain> <contractAddress> [label]\``;
 
-    await ctx.editMessageText(response, { parse_mode: 'Markdown', reply_markup: getWatchlistKeyboard(targets || []) });
+    await ctx.editMessageText(response, { parse_mode: 'Markdown', reply_markup: getWatchlistKeyboard(targets) });
     await ctx.answerCallbackQuery({ text: 'Removed from watchlist' });
   });
 
   // Watchlist Detail (re-scan)
   bot.callbackQuery(/^watchlist_detail_(.+)$/, async (ctx: any) => {
     const targetId = ctx.match[1];
-    const { data: target } = await supabase
-      .from('watchlist_targets')
-      .select('*')
-      .eq('id', targetId)
-      .maybeSingle();
+    const target = await queryOne<any>(
+      `SELECT * FROM watchlist_targets WHERE id = $1 LIMIT 1`,
+      [targetId]
+    );
 
     if (!target) return ctx.answerCallbackQuery({ text: 'Target not found.' });
 
     await ctx.answerCallbackQuery({ text: 'Scanning...' });
     const audit = await runSecurityAudit(target.chain_name, target.contract_address);
 
-    await supabase
-      .from('watchlist_targets')
-      .update({
-        last_risk_level: audit.riskLevel,
-        last_scanned_at: new Date().toISOString(),
-      })
-      .eq('id', targetId);
+    await pool.query(
+      `UPDATE watchlist_targets SET last_risk_level = $2, last_scanned_at = $3 WHERE id = $1`,
+      [targetId, audit.riskLevel, new Date().toISOString()]
+    );
 
     let report = `🛡️ *Watchlist Target Re-Scanned*\n\n`;
     report += `🔹 *Target:* \`${target.contract_address}\`\n`;
@@ -367,11 +351,10 @@ export function registerHandlers(bot: any) {
   // Schedule Detail (cancel)
   bot.callbackQuery(/^schedule_detail_(.+)$/, async (ctx: any) => {
     const scheduleId = ctx.match[1];
-    const { data: schedule } = await supabase
-      .from('mint_schedules')
-      .select('*')
-      .eq('id', scheduleId)
-      .maybeSingle();
+    const schedule = await queryOne<any>(
+      `SELECT * FROM mint_schedules WHERE id = $1 LIMIT 1`,
+      [scheduleId]
+    );
 
     if (!schedule) return ctx.answerCallbackQuery({ text: 'Schedule not found.' });
 
@@ -429,14 +412,16 @@ export function registerHandlers(bot: any) {
   bot.callbackQuery(/^set_gwei_(\d+)$/, async (ctx: any) => {
     const user: UserWithRelations = ctx.dbUser;
     const gweiVal = ctx.match[1] + '.0';
-    await supabase.from('user_settings').update({ priority_gwei: gweiVal }).eq('user_id', user.id);
+    await pool.query(
+      `UPDATE user_settings SET priority_gwei = $2 WHERE user_id = $1`,
+      [user.id, gweiVal]
+    );
     await ctx.answerCallbackQuery({ text: `Priority updated to ${gweiVal} Gwei` });
 
-    const { data: updated } = await supabase
-      .from('user_settings')
-      .select('*')
-      .eq('user_id', user.id)
-      .maybeSingle();
+    const updated = await queryOne<any>(
+      `SELECT * FROM user_settings WHERE user_id = $1 LIMIT 1`,
+      [user.id]
+    );
 
     await ctx.editMessageText(
       `🛡️ *Interactive Gas & Safety Settings*\n\n` +
@@ -451,14 +436,16 @@ export function registerHandlers(bot: any) {
   bot.callbackQuery(/^set_cap_(.+)$/, async (ctx: any) => {
     const user: UserWithRelations = ctx.dbUser;
     const capVal = ctx.match[1];
-    await supabase.from('user_settings').update({ max_eth_cap: capVal }).eq('user_id', user.id);
+    await pool.query(
+      `UPDATE user_settings SET max_eth_cap = $2 WHERE user_id = $1`,
+      [user.id, capVal]
+    );
     await ctx.answerCallbackQuery({ text: `Max ETH cap set to ${capVal} ETH` });
 
-    const { data: updated } = await supabase
-      .from('user_settings')
-      .select('*')
-      .eq('user_id', user.id)
-      .maybeSingle();
+    const updated = await queryOne<any>(
+      `SELECT * FROM user_settings WHERE user_id = $1 LIMIT 1`,
+      [user.id]
+    );
 
     await ctx.editMessageText(
       `🛡️ *Interactive Gas & Safety Settings*\n\n` +
@@ -491,7 +478,10 @@ export function registerHandlers(bot: any) {
   bot.callbackQuery('menu_toggle_automint', async (ctx: any) => {
     const user: UserWithRelations = ctx.dbUser;
     const newStatus = !(user.settings?.auto_mint_active || false);
-    await supabase.from('user_settings').update({ auto_mint_active: newStatus }).eq('user_id', user.id);
+    await pool.query(
+      `UPDATE user_settings SET auto_mint_active = $2 WHERE user_id = $1`,
+      [user.id, newStatus]
+    );
     await ctx.answerCallbackQuery({ text: `Auto-Mint is now ${newStatus ? 'ON' : 'OFF'}` });
     await ctx.editMessageText(
       `🤖 *ApexBee Professional Sniper Engine*\n\nSelect an option below:`,
@@ -535,16 +525,16 @@ export function registerHandlers(bot: any) {
     const address = ctx.match[2];
     const user: UserWithRelations = ctx.dbUser;
 
-    const { error } = await supabase.from('watchlist_targets').insert({
-      user_id: user.id,
-      chain_name: chainName,
-      contract_address: address,
-      label: 'Auto-Detected',
-    });
-
-    if (error && error.code !== '23505') {
-      await ctx.answerCallbackQuery({ text: `Error: ${error.message}` });
-      return;
+    try {
+      await pool.query(
+        `INSERT INTO watchlist_targets (user_id, chain_name, contract_address, label) VALUES ($1, $2, $3, 'Auto-Detected')`,
+        [user.id, chainName, address]
+      );
+    } catch (err: any) {
+      if (!err.message.includes('duplicate') && !err.code?.includes('23505')) {
+        await ctx.answerCallbackQuery({ text: `Error: ${err.message}` });
+        return;
+      }
     }
 
     await ctx.answerCallbackQuery({ text: 'Added to watchlist!' });
@@ -561,13 +551,10 @@ export function registerHandlers(bot: any) {
     const valueStr = ctx.match[3];
     const user: UserWithRelations = ctx.dbUser;
 
-    const { data: wallet } = await supabase
-      .from('wallets')
-      .select('*')
-      .eq('user_id', user.id)
-      .eq('is_default', true)
-      .eq('is_active', true)
-      .maybeSingle();
+    const wallet = await queryOne<any>(
+      `SELECT * FROM wallets WHERE user_id = $1 AND is_default = true AND is_active = true LIMIT 1`,
+      [user.id]
+    );
 
     if (!wallet) {
       await ctx.answerCallbackQuery({ text: 'No active default wallet!' });

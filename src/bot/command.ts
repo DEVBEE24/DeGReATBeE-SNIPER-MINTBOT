@@ -1,4 +1,4 @@
-import { supabase } from '../config/supabase';
+import { pool, queryOne } from '../config/database';
 import { encryptPrivateKey } from '../core/crypto';
 import { dispatchMintTransaction, parseWeiValue } from '../core/dispatcher';
 import { runSecurityAudit } from '../core/scanner';
@@ -6,7 +6,6 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { Address } from 'viem';
 import { backToMenuKeyboard, getMainDashboardKeyboard } from './keyboards';
 import { createSchedule, getSchedulesByUser, cancelSchedule } from '../core/scheduler';
-import { interceptAddressMessage } from '../core/interceptor';
 import { UserWithRelations } from '../types/database';
 
 export function registerCommands(bot: any) {
@@ -41,23 +40,17 @@ export function registerCommands(bot: any) {
       const encryptedKey = encryptPrivateKey(rawKey);
       const account = privateKeyToAccount(rawKey);
 
-      const { data: existing, error: countError } = await supabase
-        .from('wallets')
-        .select('id', { count: 'exact', head: true })
-        .eq('user_id', user.id);
-      if (countError) throw countError;
-      const count = existing?.length ?? 0;
+      const countResult = await pool.query(
+        `SELECT COUNT(*)::int AS count FROM wallets WHERE user_id = $1`,
+        [user.id]
+      );
+      const count = countResult.rows[0]?.count ?? 0;
 
-      const { error } = await supabase.from('wallets').insert({
-        user_id: user.id,
-        address: account.address,
-        encrypted_key: encryptedKey,
-        label,
-        is_default: count === 0,
-        is_active: true,
-      });
-
-      if (error) throw error;
+      await pool.query(
+        `INSERT INTO wallets (user_id, address, encrypted_key, label, is_default, is_active)
+         VALUES ($1, $2, $3, $4, $5, true)`,
+        [user.id, account.address, encryptedKey, label, count === 0]
+      );
 
       await ctx.reply(
         `✅ *Wallet Stored & Encrypted Successfully!*\n\n` +
@@ -78,16 +71,15 @@ export function registerCommands(bot: any) {
       return ctx.reply('⚠️ *Usage:* `/setcap 0.05` (Sets max ETH budget cap per transaction)', { parse_mode: 'Markdown' });
     }
 
-    const { error } = await supabase
-      .from('user_settings')
-      .update({ max_eth_cap: cap })
-      .eq('user_id', user.id);
-
-    if (error) {
-      return ctx.reply(`❌ *Error:* \`${error.message}\``, { parse_mode: 'Markdown' });
+    try {
+      await pool.query(
+        `UPDATE user_settings SET max_eth_cap = $2 WHERE user_id = $1`,
+        [user.id, cap]
+      );
+      await ctx.reply(`✅ *Max ETH Safety Cap set to:* \`${cap} ETH\``, { parse_mode: 'Markdown', reply_markup: backToMenuKeyboard });
+    } catch (err: any) {
+      await ctx.reply(`❌ *Error:* \`${err.message}\``, { parse_mode: 'Markdown' });
     }
-
-    await ctx.reply(`✅ *Max ETH Safety Cap set to:* \`${cap} ETH\``, { parse_mode: 'Markdown', reply_markup: backToMenuKeyboard });
   });
 
   // /scan <chain> <contractAddress>
@@ -121,7 +113,7 @@ export function registerCommands(bot: any) {
     await ctx.reply(report, { parse_mode: 'Markdown', reply_markup: backToMenuKeyboard });
   });
 
-  // /snipe <chain> <contractAddress> [valueWei]
+  // /snipe <chain> <contractAddress> [valueEth]
   bot.command('snipe', async (ctx: any) => {
     const user: UserWithRelations = ctx.dbUser;
     const input = ctx.match?.trim() || '';
@@ -133,15 +125,12 @@ export function registerCommands(bot: any) {
 
     const [chainName, contractAddress, valueStr = '0'] = args;
 
-    const { data: wallet, error: walletError } = await supabase
-      .from('wallets')
-      .select('*')
-      .eq('user_id', user.id)
-      .eq('is_default', true)
-      .eq('is_active', true)
-      .maybeSingle();
+    const wallet = await queryOne<any>(
+      `SELECT * FROM wallets WHERE user_id = $1 AND is_default = true AND is_active = true LIMIT 1`,
+      [user.id]
+    );
 
-    if (walletError || !wallet) {
+    if (!wallet) {
       return ctx.reply('❌ No active default wallet configured. Generate or activate a wallet first.', { parse_mode: 'Markdown' });
     }
 
@@ -183,14 +172,10 @@ export function registerCommands(bot: any) {
     const label = labelParts.join(' ') || 'Whale Target';
 
     try {
-      const { error } = await supabase.from('whale_targets').insert({
-        user_id: user.id,
-        chain_name: chainName.toLowerCase(),
-        address,
-        label,
-      });
-
-      if (error) throw error;
+      await pool.query(
+        `INSERT INTO whale_targets (user_id, chain_name, address, label) VALUES ($1, $2, $3, $4)`,
+        [user.id, chainName.toLowerCase(), address, label]
+      );
       await ctx.reply(`✅ *Whale Target Added!*\nTarget: \`${address}\` on [${chainName.toUpperCase()}]`, { parse_mode: 'Markdown', reply_markup: backToMenuKeyboard });
     } catch (err: any) {
       await ctx.reply(`❌ *Error:* \`${err.message}\``, { parse_mode: 'Markdown' });
@@ -207,13 +192,10 @@ export function registerCommands(bot: any) {
     }
 
     try {
-      const { error } = await supabase
-        .from('whale_targets')
-        .delete()
-        .eq('user_id', user.id)
-        .ilike('address', address);
-
-      if (error) throw error;
+      await pool.query(
+        `DELETE FROM whale_targets WHERE user_id = $1 AND address ILIKE $2`,
+        [user.id, address]
+      );
       await ctx.reply(`✅ *Whale target removed:* \`${address}\``, { parse_mode: 'Markdown', reply_markup: backToMenuKeyboard });
     } catch (err: any) {
       await ctx.reply(`❌ *Error:* \`${err.message}\``, { parse_mode: 'Markdown' });
@@ -329,14 +311,10 @@ export function registerCommands(bot: any) {
     const label = labelParts.join(' ') || 'Watchlist Target';
 
     try {
-      const { error } = await supabase.from('watchlist_targets').insert({
-        user_id: user.id,
-        chain_name: chainName.toLowerCase(),
-        contract_address: contractAddress,
-        label,
-      });
-
-      if (error) throw error;
+      await pool.query(
+        `INSERT INTO watchlist_targets (user_id, chain_name, contract_address, label) VALUES ($1, $2, $3, $4)`,
+        [user.id, chainName.toLowerCase(), contractAddress, label]
+      );
       await ctx.reply(`✅ *Added to Watchlist!*\n\`${contractAddress}\` on [${chainName.toUpperCase()}]`, { parse_mode: 'Markdown', reply_markup: backToMenuKeyboard });
     } catch (err: any) {
       await ctx.reply(`❌ *Error:* \`${err.message}\``, { parse_mode: 'Markdown' });

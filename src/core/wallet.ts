@@ -1,4 +1,4 @@
-import { supabase } from '../config/supabase';
+import { pool, queryOne } from '../config/database';
 import { encryptPrivateKey } from './crypto';
 import { privateKeyToAccount, generatePrivateKey } from 'viem/accounts';
 import { Wallet } from '../types/database';
@@ -8,27 +8,18 @@ export async function createWalletForUser(userId: string, label?: string): Promi
   const account = privateKeyToAccount(rawKey);
   const encryptedKey = encryptPrivateKey(rawKey);
 
-  const { data: existingWallets, error: countError } = await supabase
-    .from('wallets')
-    .select('id', { count: 'exact', head: true })
-    .eq('user_id', userId);
+  const countResult = await pool.query(
+    `SELECT COUNT(*)::int AS count FROM wallets WHERE user_id = $1`,
+    [userId]
+  );
+  const count = countResult.rows[0]?.count ?? 0;
 
-  if (countError) throw countError;
-  const count = existingWallets?.length ?? 0;
+  const wallet = await queryOne<Wallet>(
+    `INSERT INTO wallets (user_id, address, encrypted_key, label, is_default, is_active)
+     VALUES ($1, $2, $3, $4, $5, true) RETURNING *`,
+    [userId, account.address, encryptedKey, label || `Sniper Wallet #${count + 1}`, count === 0]
+  );
 
-  const { data, error } = await supabase
-    .from('wallets')
-    .insert({
-      user_id: userId,
-      address: account.address,
-      encrypted_key: encryptedKey,
-      label: label || `Sniper Wallet #${count + 1}`,
-      is_default: count === 0,
-      is_active: true,
-    })
-    .select()
-    .single();
-
-  if (error) throw error;
-  return data as Wallet;
+  if (!wallet) throw new Error('Failed to create wallet');
+  return wallet;
 }

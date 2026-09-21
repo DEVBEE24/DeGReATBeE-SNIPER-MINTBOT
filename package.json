@@ -9,13 +9,14 @@
     "dev": "tsx watch src/main.ts"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.45.4",
     "dotenv": "^16.4.5",
     "grammy": "^1.21.1",
+    "pg": "^8.13.0",
     "viem": "^2.17.0"
   },
   "devDependencies": {
     "@types/node": "^20.11.24",
+    "@types/pg": "^8.11.10",
     "tsx": "^4.7.1",
     "typescript": "^5.3.3"
   }

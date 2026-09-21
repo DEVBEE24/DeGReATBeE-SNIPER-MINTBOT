@@ -1,6 +1,6 @@
 import { createPublicClient, http, Address, formatEther } from 'viem';
 import { getChainConfig } from '../config/chains';
-import { supabase } from '../config/supabase';
+import { query } from '../config/database';
 import { Wallet } from '../types/database';
 
 export interface WalletBalance {
@@ -15,20 +15,18 @@ export interface WalletBalance {
 }
 
 export async function fetchWalletBalances(userId: string, chains: { chain_name: string; enabled: boolean }[]) {
-  const { data: wallets, error } = await supabase
-    .from('wallets')
-    .select('*')
-    .eq('user_id', userId)
-    .order('created_at', { ascending: true });
+  const wallets = await query<Wallet>(
+    `SELECT * FROM wallets WHERE user_id = $1 ORDER BY created_at ASC`,
+    [userId]
+  );
 
-  if (error) throw error;
-  if (!wallets || wallets.length === 0) return [];
+  if (wallets.length === 0) return [];
 
   const activeChains = chains.filter((c) => c.enabled);
   const results: WalletBalance[] = [];
 
   await Promise.all(
-    (wallets as Wallet[]).flatMap((wallet) =>
+    wallets.flatMap((wallet) =>
       activeChains.map(async (chain) => {
         try {
           const chainConfig = getChainConfig(chain.chain_name);
@@ -81,7 +79,7 @@ export function formatPortfolioMessage(balances: WalletBalance[]): string {
   let msg = '🖼️ *Live Portfolio View*\n\n';
   let totalEth = 0;
 
-  for (const [walletId, chainBalances] of byWallet) {
+  for (const [, chainBalances] of byWallet) {
     const w = chainBalances[0];
     const statusIcon = w.isActive ? '🟢' : '🔴';
     const defaultIcon = w.isDefault ? '⭐' : '';
