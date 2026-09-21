@@ -31,12 +31,10 @@ export async function runSecurityAudit(chainName: string, contractAddress: strin
     }
 
     const detectedFunctions: string[] = [];
-    // Common NFT mint function sighashes or signatures search in bytecode pattern
     if (bytecode.includes('1249c58b') || bytecode.toLowerCase().includes('mint')) detectedFunctions.push('mint() / Public Mint');
     if (bytecode.includes('6a627842') || bytecode.toLowerCase().includes('safemint')) detectedFunctions.push('safeMint()');
     if (bytecode.includes('4031718f') || bytecode.toLowerCase().includes('claim')) detectedFunctions.push('claim() / WL Claim');
 
-    // Risk assessment heuristic
     let riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' = 'LOW';
     if (detectedFunctions.length === 0) {
       riskLevel = 'MEDIUM';
@@ -59,4 +57,18 @@ export async function runSecurityAudit(chainName: string, contractAddress: strin
       error: err.message || 'Failed to connect or parse contract bytecode.',
     };
   }
+}
+
+// Compatibility wrapper for dispatcher.ts & pre-flight verification
+export async function runPreFlightCheck(
+  chainName: string,
+  contractAddress: Address,
+  rpcUrl: string,
+  valueWei: bigint
+): Promise<{ isValid: boolean; error?: string }> {
+  const audit = await runSecurityAudit(chainName, contractAddress);
+  return {
+    isValid: audit.isValid,
+    error: audit.error
+  };
 }
